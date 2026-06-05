@@ -51,7 +51,7 @@ Dar permisos de ejecución:
 bash
 chmod +x /home/kali-linux/dhcp_spoofing.py
 
-🪜 Pasos de ejecución
+Pasos de ejecución
 Paso 1 — VPC1: Ver IP actual antes del ataque
 bash
 show ip
