@@ -42,26 +42,34 @@ Levantar un servidor DHCP falso que responda a solicitudes DHCP Discover y Reque
 
 ```bash
 Crear y guardar el script:
-bashnano /home/kali-linux/dhcp_spoofing.py
+bash
+nano /home/kali-linux/dhcp_spoofing.py
 
 Pega el contenido del script, luego guarda con Ctrl+O → Enter → Ctrl+X
 
 Dar permisos de ejecución:
-bashchmod +x /home/kali-linux/dhcp_spoofing.py
+bash
+chmod +x /home/kali-linux/dhcp_spoofing.py
 
 🪜 Pasos de ejecución
 Paso 1 — VPC1: Ver IP actual antes del ataque
-bashshow ip
+bash
+show ip
+
 Paso 2 — Kali: Ejecutar el ataque
-bashsudo python3 /home/kali-linux/dhcp_spoofing.py eth0
+bash
+udo python3 /home/kali-linux/dhcp_spoofing.py eth0
+
 Paso 3 — VPC1: Solicitar nueva IP
-baship dhcp
+bash
+ip dhcp
 show ip
 
 Gateway debe mostrar 10.13.32.5 ← IP de Kali ✅
 
 Paso 4 — SW1: Aplicar contramedida
-bashconf t
+bash
+conf t
 ip dhcp snooping
 ip dhcp snooping vlan 10
 ip dhcp snooping vlan 20
@@ -71,16 +79,21 @@ interface e0/0
 exit
 end
 write memory
+
 Paso 5 — VPC1: Solicitar IP de nuevo
-baship dhcp
+bash
+ip dhcp
 show ip
 
 Gateway debe mostrar 10.13.32.1 ← R1 real ✅
 
 Paso 6 — SW1: Verificar bloqueo
-bashshow ip dhcp snooping statistics
+bash
+show ip dhcp snooping statistics
+
 Paso 7 — SW1: Limpiar configuración (entorno de laboratorio)
-bashconf t
+bash
+conf t
 no ip dhcp snooping
 end
 write memory
